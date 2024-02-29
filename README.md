@@ -18,7 +18,7 @@ An empty database is also provided and distributed here.
 ### Stardust.csproj
 - Modify the tag `<UserSecretsId>` with your own.
 
-### Modifiy appsettings.json
+### Modify appsettings.json
 
 ```
 "AzureAd": {
@@ -33,4 +33,12 @@ An empty database is also provided and distributed here.
 "ConnectionStrings": {
     "SQLite": "Data Source=Data/Database.db"   <--- Path to SQLite Database (default)
 }
+```
+
+### Modify Program.cs
+In Program.cs, a static variable named `AdminPassword` is declared, which is used as a key to encrypt Master Passwords.
+In order for BlazorVault to function properly, you must modify this variable with a very strong password (>= 126 characters) from the ASCII table (spaces & such excluded).
+
+```
+public static string AdminPassword { get; private set; } = "<Put your very strong password/key here>";
 ```
