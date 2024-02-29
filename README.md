@@ -26,7 +26,7 @@ An empty database is also provided and distributed here.
     "Domain"  :     "",     <--- Add your Azure AD domain
     "TenantId":     "",     <--- Add your Azure AD tenant ID
     "ClientId":     "",     <--- Add your Azure AD client ID
-    "ClientSecret": "", <--- Add your Azure AD client secret
+    "ClientSecret": "",     <--- Add your Azure AD client secret
     "CallbackPath": "/signin-oidc"
 },
 [...]
