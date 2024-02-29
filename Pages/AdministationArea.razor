@@ -1,0 +1,105 @@
+﻿@page "/users"
+@using BlazorVault.Data.Models
+@using BlazorVault.Pages.Components
+@inject ClipboardService ClipboardService
+@inherits LayoutComponentBase
+@inject NavigationManager NavigationManager
+
+<PageTitle>BlazorVault</PageTitle>
+
+<AuthorizeView>
+    @if (currentUser.RoleId == RoleGrade.Utilisateur)
+    {
+        // Redirect the user to / page
+        
+    }
+    else
+    {
+        <MudContainer Class="mt-8">
+            <MudGrid>
+                <MudItem xs="12" sm="12" md="12">
+                    <MudPaper Elevation="4" Class="px-4 py-4" Style="overflow-x:scroll; overscroll-behavior-x:contain">
+                        <MudDataGrid Context="user" Items="@users" Dense="true" Outlined="true" Hover="true" FixedHeader="true">
+                            <Columns>
+                                <PropertyColumn Filterable="true" Title="Mail" Property="x => x.Mail"/>
+                                <PropertyColumn Filterable="true" Title="Role" Property="x => x.RoleId.ToString()"/>
+                                <TemplateColumn>
+                                    <CellTemplate Context="cellTemplateContext">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Color="Color.Primary" Variant="Variant.Filled" Class="mr-2" OnClick="(() => EditUser(cellTemplateContext.Item))" />
+                                        @if (currentUser.RoleId == RoleGrade.Administrateur || currentUser.RoleId == RoleGrade.Editeur)
+                                        {
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Secondary" Variant="Variant.Filled" Class="mr-2" OnClick="(() => DeleteUser(cellTemplateContext.Item))" />
+                                        }
+                                    </CellTemplate>
+                                </TemplateColumn>
+                            </Columns>
+                            <PagerContent>
+                                <MudDataGridPager T="User"/>
+                            </PagerContent>
+                        </MudDataGrid>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+        </MudContainer>
+    }
+    
+</AuthorizeView>
+
+
+@code {
+    [CascadingParameter]
+    protected Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private VaultService VaultService = default!;
+    private User currentUser = new();
+    private List<User> users = new List<User>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var context = VaultServiceFactory.CreateDbContext();
+        VaultService = new VaultService(context);
+        var authState = await AuthState;
+        var user = authState.User;
+        if (user.Identity == null)
+        {
+            NavigationManager.NavigateTo("/");
+            return;
+        }
+        if (user.Identity.IsAuthenticated)
+        {
+            try
+            {
+                currentUser = await VaultService.GetUserAsync(user.Identity.Name);
+            }
+            catch
+            {
+                NavigationManager.NavigateTo("/");
+                return;
+            }
+            if (currentUser?.RoleId == RoleGrade.Utilisateur)
+            {
+                NavigationManager.NavigateTo("/");
+                return;
+            }
+            users = await VaultService.GetUsersAsync();
+        }
+    }
+
+    private async Task DeleteUser(User user)
+    {
+        var parameters = new DialogParameters();
+        parameters.Add("User", user);
+        parameters.Add("CurrentUser", currentUser);
+        var dialog = DialogService.Show<DeleteUserForm>("Supprimer un utilisateur", parameters);
+        var result = await dialog.Result;
+    }
+
+    private async Task EditUser(User user)
+    {
+        var parameters = new DialogParameters();
+        parameters.Add("User", user);
+        parameters.Add("CurrentUser", currentUser);
+        var dialog = DialogService.Show<EditUserForm>("Modifier un utilisateur", parameters);
+        var result = await dialog.Result;
+    }
+}

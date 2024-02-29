@@ -1,0 +1,40 @@
+﻿@using Microsoft.AspNetCore.Components.Authorization
+@using BlazorVault.Data.Models
+
+@code {
+    [CascadingParameter] protected Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private VaultService VaultService = default!;
+
+    public User User { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var context = VaultServiceFactory.CreateDbContext();
+        VaultService = new VaultService(context);
+        var authState = await AuthState;
+        var user = authState.User;
+
+        if (user?.Identity?.IsAuthenticated == true)
+        {
+            var email = user.FindFirst("preferred_username")?.Value;
+            if (!string.IsNullOrEmpty(email))
+            {
+                var userDetails = await VaultService.GetUserAsync(email);
+                if (userDetails == null)
+                {
+                    User user1 = new User
+                    {
+                        Mail = email,
+                        RoleId = 0,
+                        MasterPassword = "",
+                        CreatedAt = DateTime.Now,
+                        UpdatedAt = DateTime.Now
+                    };
+                    await VaultService.AddUserAsync(user1);
+                }
+            }
+        }
+        User = await VaultService.GetUserAsync(user.FindFirst("preferred_username")?.Value);
+    }
+}

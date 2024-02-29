@@ -1,0 +1,385 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@using BlazorVault.Data.Models
+@using BlazorVault.Hubs
+@using BlazorVault.Pages.Components
+@using System.Security.Claims
+@inject ClipboardService ClipboardService
+@inherits LayoutComponentBase
+@inject ISnackbar SnackBar
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject DatabaseHubService DatabaseHubService
+@implements IAsyncDisposable
+
+<PageTitle>BlazorVault</PageTitle>
+<MudSnackbarProvider />
+<MudContainer Class="mt-8 px-8" MaxWidth="MaxWidth.False">
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else
+    {
+        @if (User.MasterPassword != null && User.MasterPassword != "")
+        {
+            <MudGrid Justify="Justify.Center">
+                <MudItem xs="12" sm="12" md="12" lg="12" xl="12" Style="overflow-x:scroll; overscroll-behavior-x:contain; overflow-y:scroll; overscroll-behavior-y:contain">
+                    <MudPaper Elevation="2">
+                        <MudText Typo="Typo.body2">Astuce : Cliquez sur une ligne pour copier automatiquement votre mot de passe.</MudText>
+                        <MudDataGrid Class="mb-4" T="Password" RowClick="@RowClicked" Height="55vh" Items="@userPasswords" Filterable="true" QuickFilter="@_quickFilter" ReadOnly="false" Bordered="true" Dense="false" FixedHeader="true">
+                            <ToolBarContent>
+                                <MudText Typo="Typo.h6">Comptes</MudText>
+                                <MudSpacer />
+                                <MudTextField @bind-Value="_searchString" Placeholder="Rechercher" Adornment="Adornment.Start" Immediate="true"
+                                                AdornmentIcon="@Icons.Material.Filled.Search" IconSize="Size.Medium" Class="mt-0"></MudTextField>
+                            </ToolBarContent>
+                            <Columns>
+                                <TemplateColumn>
+                                    <HeaderTemplate>
+                                        <MudText Typo="Typo.body1">Site</MudText>
+                                    </HeaderTemplate>
+                                    <CellTemplate>
+                                        <MudAvatar Size="Size.Small">
+                                            <MudImage Src="@GetPasswordImage(context.Item)" />
+                                        </MudAvatar>
+                                        @context.Item.Domain
+                                    </CellTemplate>
+                                </TemplateColumn>
+                                <TemplateColumn>
+                                    <HeaderTemplate>
+                                        <MudText Typo="Typo.body1">Groupe</MudText>
+                                    </HeaderTemplate>
+                                    <CellTemplate>
+                                        @if (context.Item.GroupId != 0)
+                                        {
+                                            <MudText Typo="Typo.body2">@userGroups.Find(x => x.Id == context.Item.GroupId)?.Name</MudText>
+                                        }
+                                        else
+                                        {
+                                            <MudText Typo="Typo.body2">Personnel</MudText>
+                                        }
+                                    </CellTemplate>
+                                </TemplateColumn>
+                                <PropertyColumn IsEditable="true" Filterable="true" Property="x => x.CategoryName" Title="Catégorie" />
+                                <PropertyColumn IsEditable="true" Filterable="true" Property="x => x.SubcategoryName" Title="Sous-Catégorie" />
+                                <PropertyColumn IsEditable="true" Filterable="true" Property="x => x.Login" Title="Login" />
+
+                                <TemplateColumn>
+                                    <HeaderTemplate>
+                                        <MudText Typo="Typo.body1">Actions</MudText>
+                                    </HeaderTemplate>
+                                    <CellTemplate>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Color="Color.Primary" Size="Size.Small" OnClick="(() => UpdatePasswordFormInvoke(context.Item, true))" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small" OnClick="(() => DeletePasswordFormInvoke(context.Item))" />
+                                    </CellTemplate>
+                                </TemplateColumn>
+                            </Columns>
+                            <PagerContent>
+                                <MudDataGridPager T="Password" />
+                            </PagerContent>
+                        </MudDataGrid>
+                    </MudPaper>
+                </MudItem>
+
+                <MudItem xs="6" sm="6" md="6" lg="3" xl="3">
+                    <MudFab StartIcon="@Icons.Material.Filled.PersonAddAlt1" Color="Color.Primary" OnClick="(() => AddPasswordFormInvoke(true))" Label="Ajouter un compte" />
+                </MudItem>
+                <MudItem xs="6" sm="6" md="6" lg="3" xl="3">
+                    <MudFab StartIcon="@Icons.Material.Filled.Autorenew" Color="Color.Primary" OnClick="(() => RandomPasswordFormInvoke(true))" Label="Générateur de mot de passe" />
+                </MudItem>
+            </MudGrid>
+        }
+        else
+        {
+            <MudText Typo="Typo.h5">Définissez votre mot de passe principal</MudText>
+            <MudText>Vous devez définir un mot de passe principal pour pouvoir enregistrer des mots de passe.</MudText>
+            <MudButton Color="Color.Success" OnClick="(() => RedirectToSettings())">Définir mon mot de passe principal</MudButton>
+        }
+    }
+</MudContainer>
+
+@code
+{
+    [CascadingParameter]
+    protected Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    [CascadingParameter(Name = "Cookies")]
+    public Dictionary<string, string> Cookies { get; set; } = new();
+
+    ClaimsPrincipal CurrentUser { get; set; } = new();
+
+    private string _searchString = "";
+    private VaultService VaultService = default!;
+    private DotNetObjectReference<Index> objRef = default!;
+    private List<Password> userPasswords = new();
+    private HubConnection hubConnection = default!;
+
+    public bool _loading = true;
+    public bool _mobile = false;
+    public User? User { get; set; } = new();
+    public List<Group> userGroups = new();
+
+    private Func<Password, bool> _quickFilter => x =>
+    {
+        if (string.IsNullOrWhiteSpace(_searchString))
+            return true;
+
+        if (x.Alias.Contains(_searchString, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (x.CategoryName.Contains(_searchString, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (x.Domain.Contains(_searchString, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (x.Login.Contains(_searchString, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (x.SubcategoryName.Contains(_searchString, StringComparison.OrdinalIgnoreCase))
+            return true;
+        return false;
+    };
+
+    private async Task SubscribeToEvents()
+    {
+        await DatabaseHubService.InitializeConnectionAsync(Cookies);
+        hubConnection = DatabaseHubService.HubConnection;
+
+        hubConnection.On<string, string>("UpdateDatabase", async (user, message) =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await OnInitializedAsync();
+            });
+        });
+
+        hubConnection.On<string, string>("PasswordAdded", async (user, message) =>
+        {
+            await InvokeAsync(async () =>
+            {
+                SnackBar.Add($"Un mot de passe a été ajouté.", Severity.Success);
+                await OnInitializedAsync();
+            });
+        });
+
+        hubConnection.On<string, string>("PasswordDeleted", async (user, message) =>
+        {
+            await InvokeAsync(async () =>
+            {
+                SnackBar.Add($"Un mot de passe a été supprimé.", Severity.Success);
+                await OnInitializedAsync();
+            });
+        });
+
+        hubConnection.On<string, string>("PasswordUpdated", async (user, message) =>
+        {
+            await InvokeAsync(async () =>
+            {
+                SnackBar.Add($"Un mot de passe a été mis à jour.", Severity.Success);
+                await OnInitializedAsync();
+            });
+        });
+
+        hubConnection.On<string, string>("RemoveFromGroup", async (user, message) =>
+        {
+            await InvokeAsync(async () =>
+            {
+                SnackBar.Add($"Vous avez été retiré du groupe {message}.", Severity.Success);
+                await OnInitializedAsync();
+            });
+        });
+    }
+
+    async void CopyPasswordToClipboard(Password password, bool bigscreen = false)
+    {
+        try
+        {
+            bool copyResult = false;
+            if (password.GroupId == 0)
+                copyResult = await ClipboardService.CopyToClipboardAsync(Crypto.Decrypt(password.Value, Crypto.Decrypt(User.MasterPassword, Program.AdminPassword)));
+            else
+            {
+                var group = await VaultService.GetGroupAsync(password.GroupId);
+                if (group == null)
+                {
+                    SnackBar.Add("Impossible de récupérer le groupe auquel ce mot de passe appartient.", Severity.Error);
+                    return;
+                }
+                if (!group.UsersMail.Contains(User.Mail))
+                {
+                    SnackBar.Add("Vous n'êtes pas membre du groupe auquel ce mot de passe appartient.", Severity.Error);
+                    return;
+                }
+                copyResult = await ClipboardService.CopyToClipboardAsync(Crypto.Decrypt(password.Value, Crypto.Decrypt(group.CypheredPassword, Program.AdminPassword)));
+            }
+            if (!copyResult)
+                SnackBar.Add("Une erreur est survenue lors de la copie du mot de passe dans le presse-papier.", Severity.Error);
+            else
+                SnackBar.Add("Le mot de passe a bien été copié dans le presse-papier.", Severity.Success);
+        }
+        catch
+        {
+            SnackBar.Add("Une erreur est survenue lors de la copie du mot de passe dans le presse-papier.", Severity.Error);
+        }
+    }
+
+    string GetPasswordImage(Password password)
+    {
+        byte[] imageBytes = [];
+
+        imageBytes = VaultService.GetWebsiteIcon(password.Domain).Result;
+        if (imageBytes.Length == 0)
+            imageBytes = VaultService.GetWebsiteIcon("default").Result;
+
+        var imagesrc = Convert.ToBase64String(imageBytes);
+        var imageSource = string.Format("data:image/jpeg;base64,{0}", imagesrc);
+
+        return imageSource;
+    }
+
+    async Task RefreshPasswords()
+    {
+        if (User is null)
+            return;
+        userPasswords = await VaultService.GetPasswordsByUserIdAsync(User.Id);
+        userGroups = await VaultService.GetGroupsWhereUserIsMemberAsync(User);
+        foreach (var group in userGroups)
+        {
+            if (group.Id == 0)
+                continue;
+            userPasswords.AddRange(await VaultService.GetPasswordsByGroupIdAsync(group.Id));
+        }
+    }
+
+    async Task DeletePasswordFormInvoke(Password password)
+    {
+        IDialogReference? dial = DialogService.Show<DeletePasswordForm>("Supprimer un compte", new DialogParameters<DeletePasswordForm> { ["Password"] = password, ["User"] = User });
+        await dial.Result;
+        await RefreshPasswords();
+        await hubConnection.InvokeAsync("UpdateDatabase");
+        StateHasChanged();
+    }
+
+    async Task AddPasswordFormInvoke(bool bigscreen = false)
+    {
+        IDialogReference? dial;
+        if (bigscreen)
+            dial = DialogService.Show<AddAccountForm>("Ajouter un compte", new DialogParameters<AddAccountForm> { ["User"] = User }, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        else
+            dial = DialogService.Show<AddAccountForm>("Ajouter un compte", new DialogParameters<AddAccountForm> { ["User"] = User, ["isMobile"] = !bigscreen });
+        await dial.Result;
+        await RefreshPasswords();
+        await hubConnection.InvokeAsync("UpdateDatabase");
+        StateHasChanged();
+    }
+
+    async Task RandomPasswordFormInvoke(bool bigscreen = false)
+    {
+        IDialogReference? dial;
+        dial = DialogService.Show<RandomPasswordForm>("Générateur de Mots de passe", new DialogParameters<RandomPasswordForm> { ["isMobile"] = !bigscreen }, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        await dial.Result;
+        StateHasChanged();
+    }
+
+    async Task UpdatePasswordFormInvoke(Password password, bool bigscreen = false)
+    {
+        IDialogReference? dial;
+        if (bigscreen)
+            dial = DialogService.Show<UpdatePasswordForm>("Modifier un compte", new DialogParameters<UpdatePasswordForm> { ["Password"] = password, ["User"] = User }, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        else
+            dial = DialogService.Show<UpdatePasswordForm>("Modifier un compte", new DialogParameters<UpdatePasswordForm> { ["Password"] = password, ["User"] = User, ["isMobile"] = !bigscreen });
+        await dial.Result;
+        await RefreshPasswords();
+        await hubConnection.InvokeAsync("UpdateDatabase");
+        StateHasChanged();
+    }
+
+    void RedirectToSettings()
+    {
+        NavigationManager.NavigateTo("/settings");
+    }
+
+    public async Task UpdateDatasAsync(bool _refresh = true)
+    {
+        try
+        {
+            _mobile = await JSRuntime.InvokeAsync<bool>("isMobile");
+            objRef = DotNetObjectReference.Create(this);
+            await JSRuntime.InvokeVoidAsync("blazorResize.registerResizeCallback", objRef);
+            string? preferred_username = AuthState.Result.User.FindFirst("preferred_username")?.Value;
+            if (preferred_username is null)
+                return;
+            User = await VaultService.GetUserAsync(preferred_username);
+            if (User is null)
+                return;
+            await RefreshPasswords();
+            _loading = false;
+        }
+        catch
+        {
+
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var context = VaultServiceFactory.CreateDbContext();
+        VaultService = new VaultService(context);
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+
+        CurrentUser = authState.User;
+
+        try
+        {
+            await SubscribeToEvents();
+            await UpdateDatasAsync(true);
+            _loading = false;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnBrowserResize()
+    {
+        _mobile = await JSRuntime.InvokeAsync<bool>("isMobile");
+        StateHasChanged();
+    }
+
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+        _mobile = await JSRuntime.InvokeAsync<bool>("isMobile");
+        StateHasChanged();
+    }
+
+    void PreviousPage()
+    {
+        JSRuntime.InvokeVoidAsync("blazorHistory.goBack");
+    }
+
+    public void Dispose()
+    {
+        JSRuntime.InvokeVoidAsync("blazorResize.unregisterResizeCallback");
+        objRef.Dispose();
+    }
+
+    void RowClicked(DataGridRowClickEventArgs<Password> args)
+    {
+        CopyPasswordToClipboard(args.Item);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+}

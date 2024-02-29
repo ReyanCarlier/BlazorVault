@@ -1,0 +1,64 @@
+﻿@page "/about"
+@using BlazorVault.Pages.Components
+
+<PageTitle>BlazorVault</PageTitle>
+<MudContainer Class="mt-16 px-8">
+    <MudGrid>
+        <MudItem md="12" lg="12" xl="12">
+            <MudCard>
+                <MudCardHeader Class="text-center">
+                    <MudAvatar Color="Color.Primary">
+                        <MudIcon Icon="@Icons.Material.Filled.Info" />
+                    </MudAvatar>
+                    <MudText Typo="Typo.h5" Class="ml-3">Informations</MudText>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudText>
+                        Lors de votre première connexion à BlazorVault, vous êtes invités à renseigner un mot de passe principal.
+                    </MudText>
+                    <MudText>
+                        Ce mot de passe est utilisé pour chiffrer vos mots de passe de manière sécurisée, il est donc important de le conserver en lieu sûr.
+                    </MudText>
+                    <MudText>
+                        Ne le communiquez à personne, pas même à un membre de l'équipe IT, car il ne sera jamais demandé.
+                    </MudText>
+                    <MudText>
+                        Si vous perdez votre mot de passe principal, pas de panique, vous pouvez contacter le support IT afin de le réinitialiser pour vous.
+                    </MudText>
+                    <MudText>
+                        Ne notez jamais votre mot de passe principal sur un papier, ou dans un fichier texte, car il pourrait être compromis.
+                    </MudText>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+        <MudItem md="12" lg="12" xl="12">
+            <MudCard>
+                <MudCardHeader Class="text-center">
+                    <MudAvatar Color="Color.Primary">
+                        <MudIcon Icon="@Icons.Material.Filled.Info" />
+                    </MudAvatar>
+                    <MudText Typo="Typo.h5" Class="ml-3">Développement</MudText>
+                </MudCardHeader>
+                <MudCardContent>
+                    <MudText>
+                        BlazorVault est un gestionnaire de mots de passe web, dont l'utilisation est destinée aux collaborateurs.
+                    </MudText>
+                    <MudText>
+                        Numéro de version : @Program.Version
+                    </MudText>
+                    <MudText>
+                        Date de dernière mise à jour : @Program.LastUpdate
+                    </MudText>
+                    <MudText>
+                        Il est développé par <MudLink Typo="Typo.subtitle2" Href="https://linkedin.com/in/reyancarlier/" Target="_blank">Reyan CARLIER</MudLink> sous licence GNU AGPLv3.
+                    </MudText>
+                </MudCardContent>
+            </MudCard>
+        </MudItem>
+    </MudGrid>
+</MudContainer>
+
+
+@code {
+    [CascadingParameter] MudDialogInstance? MudDialog { get; set; } = default!;
+}

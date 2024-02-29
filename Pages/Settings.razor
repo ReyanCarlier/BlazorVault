@@ -1,0 +1,292 @@
+﻿@page "/settings"
+@using BlazorVault.Pages.Components
+@using Google.Authenticator
+@using BlazorVault.Data.Models
+@using BlazorVault.Pages.Components
+@using System.Security.Cryptography
+@inject SessionService SessionService
+@inherits LayoutComponentBase
+@inject NavigationManager NavigationManager
+
+<PageTitle>BlazorVault</PageTitle>
+
+<MudContainer Class="mt-16 px-8" MaxWidth="MaxWidth.False">
+        <MudGrid Justify="Justify.Center">
+        @if (_showAuth)
+        {
+            @if (User.MasterPassword == null || User.MasterPassword == "")
+            {
+                <MudItem xs="12" sm="12" md="6" lg="6" xl="6">
+                    <MudCard>
+                        <MudCardHeader>
+                            <MudGrid Justify="Justify.Center">
+                                <MudIcon Icon="@Icons.Material.Filled.Settings" Class="mr-3 mb-n1" />
+                                <MudText Typo="Typo.h6">Inscription</MudText>
+                                <MudItem>
+                                    <MudText Typo="Typo.body1">
+                                        Pour votre première connexion, vous êtes invité à choisir un mot de passe dit 'principal'.
+                                        <d/>
+                                        Ce mot de passe vous sera demandé à chaque fois que vous vous connecterez à l'application.
+                                        <d/>
+                                        Il est important de choisir un mot de passe fort et de ne pas l'oublier, ni de le noter sur un bout de papier ou un document texte.
+                                        <d/>
+                                        Votre mot de passe principal est strictement personnel, il ne vous sera jamais demandé ailleurs que sur BlazorVault.
+                                    </MudText>
+                                </MudItem>
+                            </MudGrid>
+                        </MudCardHeader>
+                        <MudCardContent>
+                            <EditMasterPasswordForm />
+                        </MudCardContent>
+                    </MudCard>
+                </MudItem>
+            }
+            else
+            {
+                @* Create a form for user to auth with his masterpasword *@
+                <MudItem xs="12" sm="12" md="6" lg="6" xl="6">
+                    <MudCard>
+                        <MudCardHeader>
+                            <MudGrid Justify="Justify.Center">
+                                <MudIcon Icon="@Icons.Material.Filled.Settings" Class="mr-3" />
+                                <MudText Typo="Typo.h6">Authentification</MudText>
+                                <MudItem>
+                                    <MudText Typo="Typo.body1">
+                                        Afin d'accéder au reste de l'application, veuillez renseigner votre mot de passe principal.
+                                        <div/>
+                                        Votre authentification sera valable jusqu'à la réactualisation de l'application, après quoi il vous sera nécessaire de vous réauthentifier.
+                                        <div />
+                                        En cas d'oubli, merci de bien vouloir contacter un administrateur.
+                                    </MudText>
+                                </MudItem>
+                            </MudGrid>
+                        </MudCardHeader>
+                        <MudCardContent>
+                            <MudForm>
+                                <MudGrid Justify="Justify.Center" Class="justify-content-center">
+                                    <MudItem xs="12" sm="12" md="12" lg="12" xl="12">
+                                        <MudTextField @bind-Value="authPassword" Label="Mot de passe principal" ReadOnly="false" />
+                                    </MudItem>
+                                    <MudItem>
+                                        <MudButton OnClick="((e) => OnAuth())" Color="Color.Success" Variant="Variant.Outlined">Me connecter</MudButton>
+                                    </MudItem>
+                                </MudGrid>
+                            </MudForm>
+                        </MudCardContent>
+                    </MudCard>
+                </MudItem>
+            }
+        }
+        else
+        {
+            <MudItem xs="12" sm="12" md="6" lg="6" xl="6">
+                <MudCard>
+                    <MudCardHeader>
+                        <MudIcon Icon="@Icons.Material.Filled.Settings" Class="mr-3 mb-n1" />
+                        <MudText Typo="Typo.h6">Changer mon mot de passe principal</MudText>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <EditMasterPasswordForm />
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+</MudContainer>
+
+@code
+{
+    [CascadingParameter] protected Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    private VaultService VaultService = default!;
+    private DotNetObjectReference<Settings> objRef = default!;
+    private string QrCodeUrl = "";
+
+    public bool _showAuth = true;
+    public string authPassword = "";
+    public bool _mobile = false;
+    public User User { get; set; } = new();
+    public bool showQrCode = false;
+    public string Code2FA = "";
+
+    public static class KeyEncoder
+    {
+        private const string Base32Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+        public static byte[] GenerateRandomKey(int size)
+        {
+            var randomBytes = new byte[size];
+            using (var rng = RandomNumberGenerator.Create())
+            {
+                rng.GetBytes(randomBytes);
+            }
+            return randomBytes;
+        }
+
+        public static string Base32Encode(byte[] data)
+        {
+            int i = 0, index = 0, digit = 0;
+            int currentByte, nextByte;
+            System.Text.StringBuilder result = new System.Text.StringBuilder((data.Length + 7) * 8 / 5);
+
+            while (i < data.Length)
+            {
+                currentByte = (data[i] >= 0) ? data[i] : (data[i] + 256);
+
+                if (index > 3)
+                {
+                    if ((i + 1) < data.Length)
+                    {
+                        nextByte = (data[i + 1] >= 0) ? data[i + 1] : (data[i + 1] + 256);
+                    }
+                    else
+                    {
+                        nextByte = 0;
+                    }
+
+                    digit = currentByte & (0xFF >> index);
+                    index = (index + 5) % 8;
+                    digit <<= index;
+                    digit |= nextByte >> (8 - index);
+                    i++;
+                }
+                else
+                {
+                    digit = (currentByte >> (8 - (index + 5))) & 0x1F;
+                    index = (index + 5) % 8;
+                    if (index == 0)
+                    {
+                        i++;
+                    }
+                }
+
+                result.Append(Base32Alphabet[digit]);
+            }
+
+            return result.ToString();
+        }
+    }
+
+
+    private bool Validate2FACode(User user, string inputCode)
+    {
+        var authenticator = new TwoFactorAuthenticator();
+        return authenticator.ValidateTwoFactorPIN(user.TwoFactorSecret, inputCode, true);
+    }
+
+    public async void OnTwoFactorCodeSubmitted(string inputCode)
+    {
+        if (Validate2FACode(User, inputCode))
+        {
+            User.TwoFactorEnabled = true;
+            await VaultService.UpdateUserAsync(User);
+            showQrCode = false;
+            var parameters = new DialogParameters<EmptyDialog>();
+            parameters.Add("Message", "L'authentification à deux facteurs a été activée avec succès.");
+            parameters.Add("Color", Color.Success);
+            parameters.Add("OkText", "Ok");
+            var dialog = DialogService.Show<EmptyDialog>("Succès", parameters);
+            var dialogResult = await dialog.Result;
+            StateHasChanged();
+        }
+        else
+        {
+            var parameters = new DialogParameters<EmptyDialog>();
+            parameters.Add("Message", "Le code d'authentification à deux facteurs est incorrect.");
+            parameters.Add("Color", Color.Error);
+            parameters.Add("OkText", "Ok");
+            var dialog = DialogService.Show<EmptyDialog>("Erreur", parameters);
+            var dialogResult = await dialog.Result;
+            StateHasChanged();
+        }
+    }
+
+    private async void Enable2FAForUser(User user)
+    {
+        var authenticator = new TwoFactorAuthenticator();
+        var setupInfo = authenticator.GenerateSetupCode("BlazorVault", user.Mail, KeyEncoder.Base32Encode(KeyEncoder.GenerateRandomKey(20)), true, 5);
+        user.TwoFactorSecret = setupInfo.ManualEntryKey;
+        await VaultService.UpdateUserAsync(user);
+        QrCodeUrl = setupInfo.QrCodeSetupImageUrl;
+        showQrCode = true;
+        StateHasChanged();
+    }
+
+    void AddPasswordForm()
+    {
+        DialogService.Show<AddAccountForm>("Ajouter un compte", new DialogParameters<AddAccountForm> { ["User"] = User });
+    }
+
+    void OnAuth()
+    {
+        try
+        {
+            var encryptedPassword = Crypto.Encrypt(authPassword, User.MasterPassword);
+            var decypheredPassword = Crypto.Decrypt(User.MasterPassword, Program.AdminPassword);
+            if (authPassword != decypheredPassword)
+            {
+                var parameters = new DialogParameters<EmptyDialog>();
+                parameters.Add("Message", "Le mot de passe principal est incorrect.");
+                parameters.Add("Color", Color.Error);
+                parameters.Add("OkText", "Ok");
+                var dialog = DialogService.Show<EmptyDialog>("Erreur", parameters);
+                StateHasChanged();
+            }
+            else
+            {
+                _showAuth = false;
+                SessionService.TwoFactorAuthentified = true;
+                StateHasChanged();
+                NavigationManager.NavigateTo("/");
+            }
+        }
+        catch
+        {
+            var parameters = new DialogParameters<EmptyDialog>();
+            parameters.Add("Message", "Le mot de passe principal est incorrect.");
+            parameters.Add("Color", Color.Error);
+            parameters.Add("OkText", "Ok");
+            var dialog = DialogService.Show<EmptyDialog>("Erreur", parameters);
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var context = VaultServiceFactory.CreateDbContext();
+        VaultService = new VaultService(context);
+        objRef = DotNetObjectReference.Create(this);
+        User = await VaultService.GetUserAsync(AuthState.Result.User.FindFirst("preferred_username")?.Value);
+        JSRuntime.InvokeVoidAsync("blazorResize.registerResizeCallback", objRef);
+        _showAuth = !SessionService.TwoFactorAuthentified;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task OnBrowserResize()
+    {
+        _mobile = await JSRuntime.InvokeAsync<bool>("isMobile");
+        StateHasChanged();
+    }
+
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+        _mobile = await JSRuntime.InvokeAsync<bool>("isMobile");
+        _showAuth = !SessionService.TwoFactorAuthentified;
+        StateHasChanged();
+    }
+
+    void PreviousPage()
+    {
+        JSRuntime.InvokeVoidAsync("blazorHistory.goBack");
+    }
+
+    public void Dispose()
+    {
+        JSRuntime.InvokeVoidAsync("blazorResize.unregisterResizeCallback");
+        objRef.Dispose();
+    }
+}

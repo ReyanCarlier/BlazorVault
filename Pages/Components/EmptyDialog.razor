@@ -1,0 +1,39 @@
+﻿@using BlazorVault.Data.Models
+
+<MudDialog>
+    <DialogContent>
+        <MudText>@Message</MudText>
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="Close">@CloseText</MudButton>
+            <MudButton Color="@Color" OnClick="Ok">@OkText</MudButton>
+        </DialogActions>
+    </MudDialog>
+    @code {
+    [CascadingParameter] MudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public User User { get; set; } = new();
+    [Parameter] public string Message { get; set; } = "Message";
+    [Parameter] public string OkText { get; set; } = "Ok";
+    [Parameter] public string CancelText { get; set; } = "Annuler";
+    [Parameter] public string CloseText { get; set; } = "Fermer";
+    [Parameter] public EventCallback<bool> OkClicked { get; set; }
+    [Parameter] public EventCallback<bool> CancelClicked { get; set; }
+    [Parameter] public Color Color { get; set; } = Color.Default;
+
+    private async Task Ok()
+    {
+        await OkClicked.InvokeAsync(true);
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+
+    private async Task Cancel()
+    {
+        await CancelClicked.InvokeAsync(true);
+        MudDialog.Cancel();
+    }
+
+    private void Close()
+    {
+        MudDialog.Close(DialogResult.Ok(true));
+    }
+}

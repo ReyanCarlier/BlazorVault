@@ -1,0 +1,96 @@
+﻿@inject ClipboardService ClipboardService
+@inject ISnackbar SnackBar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+           Modifier un utilisateur
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm>
+            <MudGrid>
+                <MudItem xs="12" md="12">
+                    <MudTextField Label="Email" @bind-Value="User.Mail" ReadOnly="true" />
+                </MudItem>
+                <MudItem xs="12" md="12">
+                    <MudTextField Label="Nouveau mot de passe" @bind-Value="NewUserPassword"/>
+                </MudItem>
+                <MudItem xs="12" md="12">
+                    <MudTextField Label="Confirmer le mot de passe" @bind-Value="NewUserPasswordConfirm"/>
+                </MudItem>
+                @if (CurrentUser.RoleId == RoleGrade.Administrateur || CurrentUser.RoleId == RoleGrade.Editeur)
+                {
+                    <MudItem xs="12" md="12">
+                        <MudSelect T="RoleGrade" Label="Role" @bind-Value="User.RoleId">
+                            <MudSelectItem Value=RoleGrade.Utilisateur>Utilisateur</MudSelectItem>
+                            <MudSelectItem Value=RoleGrade.Support>Support</MudSelectItem>
+                            <MudSelectItem Value=RoleGrade.Administrateur>Administrateur</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                }
+
+                <MudItem xs="6" md="6" lg="6">
+                    <MudIconButton Color="Color.Secondary" OnClick="(() => MudDialog?.Cancel())" Icon="@Icons.Material.Filled.Cancel" />
+                </MudItem>
+                <MudItem xs="6" md="6" lg="6">
+                    <MudIconButton Color="Color.Success" OnClick="(() => EditUser())" Icon="@Icons.Material.Filled.Save" />
+                </MudItem>
+            </MudGrid>
+        </MudForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance? MudDialog { get; set; }
+    [Parameter] public User User { get; set; } = new();
+    [Parameter] public User CurrentUser { get; set; } = new();
+
+    private VaultService VaultService = default!;
+    private string NewUserPassword = "";
+    private string NewUserPasswordConfirm = "";
+
+    protected override void OnInitialized()
+    {
+        var context = VaultServiceFactory.CreateDbContext();
+        VaultService = new VaultService(context);
+    }
+
+    private async void EditUser()
+    {
+        if (NewUserPassword != NewUserPasswordConfirm)
+        {
+            SnackBar.Add("Les mots de passe ne correspondent pas.", Severity.Error);
+            return;
+        }
+        else if (NewUserPassword.Length < 12 && NewUserPassword.Length > 0)
+        {
+            SnackBar.Add("La longueur du mot de passe doit être supérieure ou égale à 12.", Severity.Error);
+            return;
+        }
+        else if (NewUserPassword.Length > 255)
+        {
+            SnackBar.Add("La longueur du mot de passe doit être inférieure ou égale à 255.", Severity.Error);
+            return;
+        }
+        if (NewUserPassword != "" && NewUserPassword != null)
+        {
+            if (!Crypto.IsPasswordStrongEnough(NewUserPassword))
+            {
+                SnackBar.Add("Le mot de passe n'est pas assez fort.", Severity.Error);
+                return;
+            }
+        }
+        if (NewUserPassword == "")
+            NewUserPassword = null;
+        if (await VaultService.UpdateUserAsync(User, NewUserPassword))
+        {
+            SnackBar.Add("Utilisateur modifié.", Severity.Success);
+        }
+        else
+        {
+            SnackBar.Add("Erreur lors de la modification de l'utilisateur.", Severity.Error);
+        }
+        MudDialog?.Close(DialogResult.Ok(true));
+    }
+}

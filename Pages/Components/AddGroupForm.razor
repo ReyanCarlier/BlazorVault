@@ -1,0 +1,133 @@
+﻿@using BlazorVault.Data.Models
+@using BlazorVault.Pages.Components
+@using BlazorVault.Utils
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Edit" Class="mr-3 mb-n1" />
+            Créer un groupe
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="group.Name" Label="Nom du groupe" ReadOnly="false" />
+        <MudTextField @bind-Value="group.CypheredPassword" Label="Mot de passe du groupe" ReadOnly="false" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Annuler</MudButton>
+        <MudButton Color="Color.Success" OnClick="((e) => AddGroup(group))">Ajouter</MudButton>
+    </DialogActions>
+</MudDialog>
+@code {
+    [CascadingParameter] MudDialogInstance? MudDialog { get; set; }
+    private VaultService VaultService = default!;
+    [Parameter] public User User { get; set; } = new();
+    [Parameter] public bool isMobile { get; set; } = false;
+    public Group group { get; set; } = new();
+    public List<Group> userGroups = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var context = VaultServiceFactory.CreateDbContext();
+        VaultService = new VaultService(context);
+        userGroups = await VaultService.GetGroupsWhereUserIsMemberAsync(User);
+        return;
+    }
+    private void Cancel()
+    {
+        MudDialog?.Cancel();
+    }
+
+    private async void RandomPassword()
+    {
+        IDialogReference? dial = DialogService.Show<RandomPasswordForm>("Générateur de Mots de passe", new DialogParameters<RandomPasswordForm> { ["isMobile"] = isMobile }, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        await dial.Result;
+        StateHasChanged();
+    }
+
+    private async Task AddGroup(Group group)
+    {
+        DialogParameters<EmptyDialog>? parameters = new();
+        IDialogReference? dialog = null;
+        DialogResult? dialogResult = null;
+        if (string.IsNullOrEmpty(group.Name))
+        {
+            parameters = new();
+            parameters.Add("Message", "Vous devez définir un nom de groupe.");
+            parameters.Add("Color", Color.Warning);
+            parameters.Add("OkText", "Ok");
+
+            dialog = DialogService.Show<EmptyDialog>("Ajouter un groupe", parameters);
+            dialogResult = await dialog.Result;
+            return;
+        }
+
+        if (group.Name.Length > 15)
+        {
+            parameters = new();
+            parameters.Add("Message", "Le nom du groupe ne peut pas dépasser 15 caractères.");
+            parameters.Add("Color", Color.Warning);
+            parameters.Add("OkText", "Ok");
+
+            dialog = DialogService.Show<EmptyDialog>("Ajouter un groupe", parameters);
+            dialogResult = await dialog.Result;
+            return;
+        }
+
+        if (group.Name.Trim() == "" || group.Name.ToLower().Contains("personnel"))
+        {
+            parameters = new();
+            parameters.Add("Message", "Le nom du groupe ne peut pas être vide ou contenir le mot \"Personnel\".");
+            parameters.Add("Color", Color.Warning);
+            parameters.Add("OkText", "Ok");
+
+            dialog = DialogService.Show<EmptyDialog>("Ajouter un groupe", parameters);
+            dialogResult = await dialog.Result;
+            return;
+        }
+
+        if (User.MasterPassword == null || User.MasterPassword == "")
+        {
+            parameters.Add("Message", "Vous devez définir un mot de passe principal avant d'ajouter un groupe.");
+            parameters.Add("Color", Color.Warning);
+            parameters.Add("OkText", "Ok");
+
+            dialog = DialogService.Show<EmptyDialog>("Ajouter un groupe", parameters);
+            dialogResult = await dialog.Result;
+            return;
+        }
+        if (!Crypto.IsPasswordStrongEnough(group.CypheredPassword))
+        {
+            parameters = new();
+            parameters.Add("Message", "Le mot de passe doit contenir au moins 12 caractères, dont une majuscule, une minuscule, un chiffre et un caractère spécial.");
+            parameters.Add("Color", Color.Warning);
+            parameters.Add("OkText", "Ok");
+
+            dialog = DialogService.Show<EmptyDialog>("Ajouter un groupe", parameters);
+            dialogResult = await dialog.Result;
+            return;
+        }
+
+        group.CypheredPassword = Crypto.Encrypt(group.CypheredPassword, group.CypheredPassword);
+        group.CreationDate = DateTime.Now;
+        group.OwnerId = User.Id;
+        bool added = await VaultService.AddGroupAsync(group);
+        parameters = new();
+        if (added)
+        {
+            userGroups.Add(group);
+            parameters.Add("Message", $"Le groupe {group.Name} a été créé avec succès.");
+            parameters.Add("Color", Color.Success);
+        }
+        else
+        {
+            parameters.Add("Message", "Une erreur est survenue lors de la création du groupe.");
+            parameters.Add("Color", Color.Error);
+        }
+        parameters.Add("OkText", "Ok");
+
+        dialog = DialogService.Show<EmptyDialog>("Créer un groupe", parameters);
+        dialogResult = await dialog.Result;
+        MudDialog?.Close(DialogResult.Ok(group?.Id));
+    }
+}

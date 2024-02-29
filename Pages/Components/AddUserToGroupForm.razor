@@ -1,0 +1,177 @@
+﻿@using BlazorVault.Data.Models
+@using BlazorVault.Pages.Components
+@using BlazorVault.Utils
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Edit" Class="mr-3 mb-n1" />
+            Ajouter un utilisateur au groupe @Group.Name
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="userToAddEmail" Label="Email" ReadOnly="false" />
+        <MudTextField @bind-Value="uncypheredPassword" Label="Mot de passe du groupe" ReadOnly="false" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Annuler</MudButton>
+        <MudButton Color="Color.Success" OnClick="(() => AddUser())">Ajouter</MudButton>
+    </DialogActions>
+</MudDialog>
+@code {
+    [CascadingParameter] MudDialogInstance? MudDialog { get; set; }
+    [Parameter] public Group Group { get; set; } = new();
+    [Parameter] public User User { get; set; } = new();
+    [Parameter] public bool isMobile { get; set; } = false;
+
+    private VaultService VaultService = default!;
+
+    public List<User> users = [];
+    public User userToAdd = new();
+    public string userToAddEmail = "";
+    public string uncypheredPassword = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var context = VaultServiceFactory.CreateDbContext();
+        VaultService = new VaultService(context);
+        users = await VaultService.GetUsersAsync();
+    }
+
+    private void Cancel()
+    {
+        MudDialog?.Cancel();
+    }
+
+    private async Task AddUser()
+    {
+        DialogParameters<EmptyDialog>? parameters = new();
+        IDialogReference? dialog = null;
+        DialogResult? dialogResult = null;
+
+        if (Group.OwnerId != User.Id)
+        {
+            parameters = new();
+            parameters.Add("Message", "Vous n'êtes pas le propriétaire du groupe.");
+            parameters.Add("Color", Color.Warning);
+            parameters.Add("OkText", "Ok");
+
+            dialog = DialogService.Show<EmptyDialog>("Ajouter un utilisateur au groupe", parameters);
+            dialogResult = await dialog.Result;
+            return;
+        }
+
+        if (string.IsNullOrEmpty(uncypheredPassword))
+        {
+            parameters = new();
+            parameters.Add("Message", "Le mot de passe du groupe ne peut pas être vide.");
+            parameters.Add("Color", Color.Warning);
+            parameters.Add("OkText", "Ok");
+
+            dialog = DialogService.Show<EmptyDialog>("Ajouter un utilisateur au groupe", parameters);
+            dialogResult = await dialog.Result;
+            return;
+        }
+
+        if (string.IsNullOrEmpty(userToAddEmail))
+        {
+            parameters = new();
+            parameters.Add("Message", "L'email ne peut pas être vide.");
+            parameters.Add("Color", Color.Warning);
+            parameters.Add("OkText", "Ok");
+
+            dialog = DialogService.Show<EmptyDialog>("Ajouter un utilisateur au groupe", parameters);
+            dialogResult = await dialog.Result;
+            return;
+        }
+
+        if (Group.UsersMail.Contains(userToAddEmail))
+        {
+            parameters = new();
+            parameters.Add("Message", "L'utilisateur indiqué est déjà dans le groupe.");
+            parameters.Add("Color", Color.Warning);
+            parameters.Add("OkText", "Ok");
+
+            dialog = DialogService.Show<EmptyDialog>("Ajouter un utilisateur au groupe", parameters);
+            dialogResult = await dialog.Result;
+            return;
+        }
+
+        try
+        {
+            userToAdd = users.First(u => u.Mail == userToAddEmail);
+            if (userToAdd == null)
+            {
+                parameters = new();
+                parameters.Add("Message", "L'utilisateur indiqué n'existe pas ou ne s'est pas encore connecté à BlazorVault..");
+                parameters.Add("Color", Color.Warning);
+                parameters.Add("OkText", "Ok");
+
+                dialog = DialogService.Show<EmptyDialog>("Ajouter un utilisateur au groupe", parameters);
+                dialogResult = await dialog.Result;
+                return;
+            }
+        }
+        catch
+        {
+            parameters = new();
+            parameters.Add("Message", "L'utilisateur indiqué n'existe pas ou ne s'est pas encore connecté à BlazorVault.");
+            parameters.Add("Color", Color.Warning);
+            parameters.Add("OkText", "Ok");
+
+            dialog = DialogService.Show<EmptyDialog>("Ajouter un utilisateur au groupe", parameters);
+            dialogResult = await dialog.Result;
+            return;
+        }
+
+        string cypheredPassword = "";
+
+        try
+        {
+            cypheredPassword = Crypto.Encrypt(uncypheredPassword, uncypheredPassword);
+            cypheredPassword = Crypto.Encrypt(cypheredPassword, Program.AdminPassword);
+            if (cypheredPassword != Group.CypheredPassword)
+            {
+                parameters = new();
+                parameters.Add("Message", "Le mot de passe du groupe est incorrect.");
+                parameters.Add("Color", Color.Warning);
+                parameters.Add("OkText", "Ok");
+
+                dialog = DialogService.Show<EmptyDialog>("Ajouter un utilisateur au groupe", parameters);
+                dialogResult = await dialog.Result;
+                return;
+            }
+        }
+        catch
+        {
+            parameters = new();
+            parameters.Add("Message", "Le mot de passe du groupe est incorrect.");
+            parameters.Add("Color", Color.Warning);
+            parameters.Add("OkText", "Ok");
+
+            dialog = DialogService.Show<EmptyDialog>("Ajouter un utilisateur au groupe", parameters);
+            dialogResult = await dialog.Result;
+            return;
+        }
+        
+
+        bool added = await VaultService.AddUserToGroupAsync(userToAdd, Group);
+        if (added)
+        {
+            parameters = new();
+            parameters.Add("Message", $"L'utilisateur a été ajouté au groupe {Group.Name} avec succès.");
+            parameters.Add("Color", Color.Success);
+        }
+        else
+        {
+            parameters = new();
+            parameters.Add("Message", "Une erreur est survenue lors de l'ajout de l'utilisateur.");
+            parameters.Add("Color", Color.Error);
+        }
+        parameters.Add("OkText", "Ok");
+
+        dialog = DialogService.Show<EmptyDialog>("Ajouter un utilisateur", parameters);
+        dialogResult = await dialog.Result;
+        MudDialog?.Close(DialogResult.Ok(userToAdd?.Id));
+    }
+}

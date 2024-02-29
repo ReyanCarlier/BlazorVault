@@ -1,0 +1,309 @@
+﻿@page "/groups"
+@using Microsoft.AspNetCore.SignalR.Client
+@using BlazorVault.Hubs
+@using BlazorVault.Pages.Components
+@using System.Net
+@using System.Security.Claims
+@inherits LayoutComponentBase
+@inject IJSRuntime JSRuntime
+@inject NavigationManager NavigationManager
+@inject ClipboardService ClipboardService
+@inject IDialogService DialogService
+@inject ISnackbar SnackBar
+@implements IAsyncDisposable
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject DatabaseHubService DatabaseHubService
+
+<PageTitle>BlazorVault</PageTitle>
+<MudSnackbarProvider />
+<MudContainer Class="mt-16 px-8" MaxWidth="MaxWidth.False">
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" Size="Size.Large" />
+    }
+    else
+    {
+        @if (TemplatedGroups.Count > 0)
+        {
+            <MudButton Color="Color.Primary" Class="mb-4" Variant="Variant.Filled" OnClick="@(() => CreateGroupFormInvoke())">
+                Créer un groupe
+            </MudButton>
+        }
+        <MudGrid Justify="Justify.Center">
+            @if (TemplatedGroups.Count == 0)
+            {
+                <MudItem xs="12" sm="12" md="12" lg="12" xl="12">
+                    <MudPaper Elevation="2">
+                        <MudItem xs="12" sm="12" md="12" lg="12" xl="12">
+                            <MudText Typo="Typo.h5">Vous n'appartenez à aucun groupe.</MudText>
+                        </MudItem>
+                        <MudItem xs="12" sm="12" md="12" lg="12" xl="12">
+                            <MudText Typo="Typo.body1">Vous pouvez créer votre premier groupe en cliquant sur le bouton ci-dessous.</MudText>
+                        </MudItem>
+                        <MudItem xs="12" sm="12" md="12" lg="12" xl="12">
+                            <MudText Typo="Typo.body1">Vous souhaitez rejoindre un groupe existant ? Demandez au propriétaire du groupe de vous ajouter depuis cette même page.</MudText>
+                        </MudItem>
+                        <MudItem xs="12" sm="12" md="12" lg="12" xl="12">
+                            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="@(() => CreateGroupFormInvoke())">
+                                Créer un groupe
+                            </MudButton>
+                        </MudItem>
+                    </MudPaper>
+                </MudItem>
+            }
+            else
+            {
+                foreach (var templatedGroup in TemplatedGroups)
+                {
+                    <MudItem xs="6" sm="6" md="6" lg="4" xl="4">
+                        <MudPaper Elevation="2">
+                            <MudDataGrid Class="mb-4" T="User" Items="@templatedGroup.users" ReadOnly="false" Bordered="true" Dense="false" FixedHeader="true">
+                                <ToolBarContent>
+                                    <MudText Typo="Typo.h6">Groupe @templatedGroup.group.Name</MudText>
+                                        <MudSpacer />
+                                        @if (templatedGroup.group.OwnerId == User.Id)
+                                    {
+                                        <MudIconButton Icon="@Icons.Material.Filled.PersonAdd" Color="Color.Success" Class="mr-1" Variant="Variant.Filled" OnClick="@(() => AddUserToGroupFormInvoke(templatedGroup.group))" />
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Class="ml-1" Variant="Variant.Filled" OnClick="@(() => DeleteGroup(templatedGroup.group))" />
+                                    }
+                                    else if (templatedGroup.group.OwnerId != User.Id)
+                                    {
+                                        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="@(() => LeaveGroup(templatedGroup.group))">
+                                            Quitter le groupe
+                                        </MudButton>
+                                    }
+                                </ToolBarContent>
+                                <Columns>
+                                    <PropertyColumn IsEditable="true" Filterable="true" Property="x => x.Mail" Title="Email" />
+                                    @if (templatedGroup.group.OwnerId == User.Id)
+                                    {
+                                        <TemplateColumn>
+                                            <CellTemplate>
+                                                <MudIconButton Icon="@Icons.Material.Filled.PersonRemove" Color="Color.Error" Size="Size.Small" OnClick="((e) => DeleteUserFromGroup(templatedGroup.group, context.Item))" />
+                                            </CellTemplate>
+                                        </TemplateColumn>
+                                    }
+                                </Columns>
+                            </MudDataGrid>
+                        </MudPaper>
+                    </MudItem>
+                }
+            }
+        </MudGrid>
+    }
+</MudContainer>
+
+
+@code {
+    [CascadingParameter]
+    protected Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    [CascadingParameter(Name = "Cookies")]
+    public Dictionary<string, string> Cookies { get; set; } = new();
+
+    private VaultService VaultService = default!;
+    private DotNetObjectReference<Groups> objRef = default!;
+    private HubConnection hubConnection = default!;
+
+    public bool _mobile = false;
+    public bool _loading = true;
+    public User User { get; set; } = new();
+    public List<Group> UserGroups { get; set; } = new();
+    public List<GroupTemplated> TemplatedGroups { get; set; } = new();
+
+    ClaimsPrincipal CurrentUser = default!;
+    
+    public class GroupTemplated
+    {
+        public Group group { get; set; } = new();
+        public List<User> users { get; set; } = new();
+    }
+
+    private async Task SubscribeToEvents()
+    {
+        await DatabaseHubService.InitializeConnectionAsync(Cookies);
+        hubConnection = DatabaseHubService.HubConnection;
+
+        hubConnection.On<string, string>("UpdateDatabase", async (user, message) =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await OnInitializedAsync();
+            });
+        });
+
+        hubConnection.On<string, string>("RemoveFromGroup", async (user, message) =>
+        {
+            await InvokeAsync(async () =>
+            {
+                SnackBar.Add($"Vous avez été retiré du groupe {message}.", Severity.Success);
+                await OnInitializedAsync();
+            });
+        });
+
+        hubConnection.On<string, string>("AddedInGroup", async (user, message) =>
+        {
+            await InvokeAsync(async () =>
+            {
+                SnackBar.Add($"Vous avez été ajouté au groupe {message}.", Severity.Success);
+                await OnInitializedAsync();
+            });
+        });
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var context = VaultServiceFactory.CreateDbContext();
+        VaultService = new VaultService(context);
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+
+        CurrentUser = authState.User;
+
+        try
+        {
+            await SubscribeToEvents();
+            await UpdateDatasAsync(true);
+            _loading = false;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+        }
+    }
+
+    public async Task UpdateDatasAsync(bool refresh = true)
+    {
+        try
+        {
+            User = await VaultService.GetUserAsync(AuthState.Result.User.FindFirst("preferred_username")?.Value);
+            UserGroups = await VaultService.GetGroupsOwnedByUserAsync(User);
+            List<Group> groupsWhereUserIsMember = await VaultService.GetGroupsWhereUserIsMemberAsync(User);
+            foreach (var groupWhereUserIs in groupsWhereUserIsMember)
+            {
+                if (!UserGroups.Contains(groupWhereUserIs))
+                {
+                    UserGroups.Add(groupWhereUserIs);
+                }
+            }
+            TemplatedGroups = new();
+            foreach (var group in UserGroups)
+            {
+                GroupTemplated groupTemplated = new();
+                groupTemplated.group = group;
+                groupTemplated.users = await VaultService.GetUsersInGroupAsync(group);
+                TemplatedGroups.Add(groupTemplated);
+            }
+            if (refresh)
+                StateHasChanged();
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e.Message);
+        }
+    }
+
+    public async Task DeleteUserFromGroup(Group group, User user)
+    {
+        if (group.OwnerId == User.Id && user != User)
+        {
+            try
+            {
+
+                await VaultService.RemoveUserFromGroupAsync(user, group);
+                await hubConnection.InvokeAsync("SendMessageToSpecificClient", user.Mail, "RemoveFromGroup", group.Name);
+                foreach (var mail in group.UsersMail.Split(','))
+                {
+                    if (mail == "") continue;
+                    await hubConnection.InvokeAsync("SendMessageToSpecificClient", mail, "UpdateDatabase", "");
+                }
+            }
+            catch
+            {
+
+            }
+        }
+        else
+        {
+            SnackBar.Add("Vous ne pouvez pas vous retirer du groupe.\nSi vous souhaitez supprimer le groupe, appuyez sur la corbeille.", Severity.Error);
+        }
+    }
+
+    public async Task LeaveGroup(Group group)
+    {
+        if (group.OwnerId != User.Id)
+        {
+            try
+            {
+                await VaultService.RemoveUserFromGroupAsync(User, group);
+                await hubConnection.InvokeAsync("UpdateDatabase");
+            }
+            catch
+            {
+
+            }
+        }
+    }
+
+    public async Task CreateGroupFormInvoke()
+    {
+        IDialogReference? dial;
+        dial = DialogService.Show<AddGroupForm>("Créer un groupe", new DialogParameters<AddGroupForm> { ["User"] = User, ["isMobile"] = _mobile }, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        var result = await dial.Result;
+        if (result != null)
+        {
+            await hubConnection.InvokeAsync("UpdateDatabase");
+        }
+    }
+
+    public async Task AddUserToGroupFormInvoke(Group group)
+    {
+        IDialogReference? dial;
+        dial = DialogService.Show<AddUserToGroupForm>("Ajouter un membre", new DialogParameters<AddUserToGroupForm> { ["User"] = User, ["Group"] = group, ["isMobile"] = _mobile }, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        await dial.Result;
+        if (dial.Result != null)
+        {
+            try
+            {
+                await hubConnection.InvokeAsync("UpdateDatabase");
+            }
+            catch
+            {
+
+            }
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+
+    public async Task DeleteGroup(Group group)
+    {
+        if (group.OwnerId == User.Id)
+        {
+            try
+            {
+                await VaultService.DeleteGroupAsync(group.Id);
+                UserGroups = await VaultService.GetGroupsOwnedByUserAsync(User);
+                TemplatedGroups = new();
+                foreach (var groupWhereUserIs in UserGroups)
+                {
+                    GroupTemplated groupTemplated = new();
+                    groupTemplated.group = groupWhereUserIs;
+                    groupTemplated.users = await VaultService.GetUsersInGroupAsync(groupWhereUserIs);
+                    TemplatedGroups.Add(groupTemplated);
+                }
+                SnackBar.Add("Le groupe a été supprimé avec succès.", Severity.Success);
+                await hubConnection.InvokeAsync("UpdateDatabase");
+            }
+            catch
+            {
+
+            }
+        }
+    }
+}

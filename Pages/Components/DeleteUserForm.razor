@@ -1,0 +1,70 @@
+﻿@inject ClipboardService ClipboardService
+@inject ISnackbar SnackBar
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            Supprimer un utilisateur
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudForm>
+            <MudGrid>
+                <MudItem xs="12" md="12">
+                    <MudTextField Label="Email" @bind-Value="User.Mail" ReadOnly="true" />
+                </MudItem>
+
+                <MudItem xs="6" md="6" lg="6">
+                    <MudIconButton Color="Color.Secondary" OnClick="(() => MudDialog?.Cancel())" Icon="@Icons.Material.Filled.Cancel" />
+                </MudItem>
+                <MudItem xs="6" md="6" lg="6">
+                    <MudIconButton Color="Color.Error" OnClick="(() => DeleteUser())" Icon="@Icons.Material.Filled.Delete" />
+                </MudItem>
+            </MudGrid>
+        </MudForm>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    [CascadingParameter] MudDialogInstance? MudDialog { get; set; }
+    [Parameter] public User User { get; set; } = new();
+    [Parameter] public User CurrentUser { get; set; } = new();
+
+    private VaultService VaultService = default!;
+
+    protected override void OnInitialized()
+    {
+        var context = VaultServiceFactory.CreateDbContext();
+        VaultService = new VaultService(context);
+    }
+
+    private async void DeleteUser()
+    {
+        if (CurrentUser == User)
+        {
+            SnackBar.Add("Vous ne pouvez pas supprimer votre propre compte.", Severity.Error);
+            return;
+        }
+        if (User.RoleId == RoleGrade.Administrateur && CurrentUser.RoleId != RoleGrade.Editeur)
+        {
+            SnackBar.Add("Vous ne pouvez pas supprimer un administrateur.", Severity.Error);
+            return;
+        }
+        
+        if (CurrentUser.RoleId != RoleGrade.Administrateur && CurrentUser.RoleId != RoleGrade.Editeur)
+        {
+            SnackBar.Add("Vous n'avez pas les droits pour supprimer un utilisateur.", Severity.Error);
+            return;
+        }
+
+        if (await VaultService.DeleteUserAsync(User))
+        {
+            SnackBar.Add("Utilisateur supprimé.", Severity.Success);
+        }
+        else
+        {
+            SnackBar.Add("Erreur lors de la modification de l'utilisateur.", Severity.Error);
+        }
+        MudDialog?.Close(DialogResult.Ok(true));
+    }
+}

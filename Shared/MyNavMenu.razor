@@ -1,0 +1,42 @@
+@inject IHttpContextAccessor HttpContextAccessor
+<MudNavMenu>
+    <MudNavLink Href="/" Match="NavLinkMatch.All">Comptes enregistrés</MudNavLink>
+    <MudNavLink Href="/groups" Match="NavLinkMatch.Prefix">Groupes</MudNavLink>
+    <MudNavLink Href="/settings"  Match="NavLinkMatch.Prefix">Paramètres</MudNavLink>
+    <MudNavLink Href="/about"  Match="NavLinkMatch.Prefix">Informations</MudNavLink>
+    @if (role != RoleGrade.Utilisateur)
+    {
+        <MudNavLink Href="/users" Match="NavLinkMatch.Prefix">Administration</MudNavLink>
+    }
+</MudNavMenu>
+
+@code
+{
+    [CascadingParameter] protected Task<AuthenticationState> AuthState { get; set; } = null!;
+    public RoleGrade role = 0;
+    private VaultService VaultService;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState;
+        var user = authState.User;
+        if (user.Identity == null)
+        {
+            NavigationManager.NavigateTo("/");
+            return;
+        }
+        var context = VaultServiceFactory.CreateDbContext();
+        VaultService = new VaultService(context);
+        if (user.Identity.IsAuthenticated)
+        {
+            try
+            {
+                role = await VaultService.GetUserRoleAsync(user.Identity.Name);
+            }
+            catch
+            {
+                role = RoleGrade.Utilisateur;
+            }
+        }
+    }
+}

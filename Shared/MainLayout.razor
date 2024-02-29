@@ -1,0 +1,131 @@
+﻿@using BlazorVault.Pages.Components
+@using Microsoft.AspNetCore.SignalR.Client
+@using System.Net
+@using System.Security.Claims
+@inherits LayoutComponentBase
+@inject IJSRuntime JSRuntime
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject NavigationManager NavigationManager
+
+<MudThemeProvider IsDarkMode="true" />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<AuthorizeView>
+    <MudLayout>
+        <AfterLogin />
+            @if (!_mobile)
+            {
+                <MudAppBar Elevation="1">
+                    <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="@((e) => DrawerToggle())" />
+                    <MudText Typo="Typo.h5" Class="ml-3">BlazorVault</MudText>
+                    <MudSpacer />
+                    <LoginDisplay />
+                </MudAppBar>
+            }
+            else
+            {
+                <MudAppBar Bottom="@_mobile" Elevation="1" Style="height: 7vh">
+                    <MudIconButton Class="ma-auto" Icon="@Icons.Material.Filled.SwitchAccount" Color="Color.Surface" Size="Size.Large" Href="/" />
+                    <MudIconButton Class="ma-auto" Icon="@Icons.Material.Filled.Autorenew" Color="Color.Surface" Size="Size.Large" OnClick="@((e) => RandomPasswordDialog())" />
+                    <MudIconButton Class="ma-auto" Href="/settings" Icon="@Icons.Material.Filled.Settings" Color="Color.Surface" Size="Size.Large"/>
+                </MudAppBar>
+            }
+        
+        <MudDrawer @bind-open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="2">
+            <MyNavMenu/>
+        </MudDrawer>
+        <MudMainContent>
+            @Body
+        </MudMainContent>
+        <MudAppBar Elevation="1" Style="top: auto; bottom: 0" Dense="true" Fixed="true">
+            <MudGrid Justify="Justify.Center">
+                <MudText Style="font-size:small">Developped with 💜 by <MudLink Href="https://www.linkedin.com/in/reyancarlier">Reyan Carlier</MudLink></MudText>
+            </MudGrid>
+        </MudAppBar>
+    </MudLayout>
+</AuthorizeView>
+
+
+@code {
+    private DotNetObjectReference<MainLayout> objRef = default!;
+    private VaultService VaultService = default!;
+
+    bool _drawerOpen = true;
+
+    public bool _mobile = false;
+
+
+    /**
+     * 
+     * Initialisation de la connexion au hub SignalR.
+     * Les évènements sont ensuite écoutés dans chaque composant Razor.
+     * 
+     **/
+    [CascadingParameter(Name = "Cookies")]
+    public Dictionary<string, string> Cookies { get; set; } = new();
+
+    ClaimsPrincipal CurrentUser = new();
+
+    public HubConnection hubConnection = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var context = VaultServiceFactory.CreateDbContext();
+        VaultService = new VaultService(context);
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+
+        CurrentUser = authState.User;
+    }
+
+    [JSInvokable]
+    public async Task OnBrowserResize()
+    {
+        _mobile = await JSRuntime.InvokeAsync<bool>("isMobile");
+        if (_drawerOpen)
+            _drawerOpen = !_mobile;
+        StateHasChanged();
+    }
+
+    private async void RandomPasswordDialog()
+    {
+        IDialogReference? dial = DialogService.Show<RandomPasswordForm>("Générateur de Mots de passe", new DialogParameters<RandomPasswordForm> { ["isMobile"] = _mobile }, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+        await dial.Result;
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        objRef = DotNetObjectReference.Create(this);
+        await JSRuntime.InvokeVoidAsync("blazorResize.registerResizeCallback", objRef);
+        
+        var currentUri = NavigationManager.Uri;
+
+        if (!SessionService.TwoFactorAuthentified && !currentUri.EndsWith("/settings") && !currentUri.EndsWith("/about"))
+        {
+            NavigationManager.NavigateTo("/settings");
+            return;
+        }
+        if (!firstRender)
+            return;
+        _mobile = await JSRuntime.InvokeAsync<bool>("isMobile");
+        if (_drawerOpen)
+            _drawerOpen = !_mobile;
+    }
+
+    void DrawerToggle()
+    {
+        _drawerOpen = !_drawerOpen;
+    }
+
+    void PreviousPage()
+    {
+        NavigationManager.NavigateTo("/", true);
+    }
+
+    public void Dispose()
+    {
+        JSRuntime.InvokeVoidAsync("blazorResize.unregisterResizeCallback");
+        objRef.Dispose();
+    }
+}

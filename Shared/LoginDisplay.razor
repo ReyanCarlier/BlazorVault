@@ -1,0 +1,32 @@
+﻿<AuthorizeView>
+    <Authorized>
+        <MudText Typo="Typo.subtitle2">@ReturnName()</MudText>
+        <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Primary" Size="Size.Medium" Href="MicrosoftIdentity/Account/SignOut" />
+    </Authorized>
+    <NotAuthorized>
+        <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Primary" Size="Size.Medium" Href="MicrosoftIdentity/Account/SignIn">Connexion</MudIconButton>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code
+    {
+    [CascadingParameter] protected Task<AuthenticationState> AuthState { get; set; } = null!;
+
+    string? ReturnName()
+    {
+        var context = AuthState.Result;
+        if (context == null || context.User == null || context.User.Identity == null)
+        {
+            return "Utilisateur inconnu";
+        }
+
+        if (context.User.Identity.IsAuthenticated)
+        {
+            return context.User.Identity.Name;
+        }
+        else
+        {
+            return "Utilisateur inconnu";
+        }
+    }
+}
