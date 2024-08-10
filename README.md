@@ -15,7 +15,7 @@ An empty database is also provided and distributed here.
 
 ## Configuration
 
-### Stardust.csproj
+### BlazorVault.csproj
 - Modify the tag `<UserSecretsId>` with your own.
 
 ### Modify appsettings.json
